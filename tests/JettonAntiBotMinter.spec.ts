@@ -727,4 +727,24 @@ describe('JettonWallet', () => {
             success: true,
         });
     });
+
+    it('owner should able to change white list', async() => {
+        let deployerWallet = await userWallet(deployer.address);
+        const updateWhiteListResult = await jettonMinter.sendUpdateWhiteList(
+            deployer.getSender(),
+            deployer.address,
+            toNano('0.05'),
+            -1,
+        );
+
+        expect(updateWhiteListResult.transactions).toHaveTransaction({
+            from: jettonMinter.address,
+            to: deployerWallet.address,
+            success: true,
+        });
+
+        let antiBotData = await deployerWallet.getJettonAntiBotData();
+        // console.log(antiBotData);
+        expect(antiBotData.isWhiteList).toEqual(-1);
+    });
 });

@@ -1,30 +1,27 @@
-cell pack_anti_bot_record_data(slice admin_address, slice owner_address, int last_transaction_time, int delay_time) inline {
+cell pack_jetton_wallet_data(int balance, slice owner_address, slice jetton_master_address, slice anti_bot_address, cell jetton_wallet_code) inline {
    return  begin_cell()
-            .store_slice(admin_address)
+            .store_coins(balance)
             .store_slice(owner_address)
-            .store_uint(last_transaction_time, 64)
-            .store_uint(delay_time, 64)
+            .store_slice(jetton_master_address)
+            .store_ref(begin_cell().store_int(0, 32).store_uint(0, 64).store_slice(anti_bot_address).end_cell())
+            .store_ref(jetton_wallet_code)
            .end_cell();
 }
 
-cell calculate_anti_bot_record_state_init(slice admin_address, slice owner_address, int delay_time, cell anti_bot_record_code) inline {
+cell calculate_anti_bot_address(slice owner_address, slice jetton_master_address, slice anti_bot_address, cell jetton_wallet_code) inline {
   return begin_cell()
           .store_uint(0, 2)
-          .store_dict(anti_bot_record_code)
-          .store_dict(pack_anti_bot_record_data(admin_address, owner_address, 0, delay_time))
+          .store_dict(jetton_wallet_code)
+          .store_dict(pack_jetton_wallet_data(0, owner_address, jetton_master_address, anti_bot_address, jetton_wallet_code))
           .store_uint(0, 1)
          .end_cell();
 }
 
-slice calculate_anti_bot_record_address(cell state_init) inline {
+slice calculate_anti_bot_address(cell state_init) inline {
   return begin_cell().store_uint(4, 3)
                      .store_int(workchain(), 8)
                      .store_uint(cell_hash(state_init), 256)
                      .end_cell()
                      .begin_parse();
-}
-
-slice calculate_user_anti_bot_record_address(slice admin_address, slice owner_address, int delay_time, cell anti_bot_record_code) inline {
-  return calculate_anti_bot_record_address(calculate_anti_bot_record_state_init(admin_address, owner_address, delay_time, anti_bot_record_code));
 }
 
