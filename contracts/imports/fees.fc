@@ -1,0 +1,5 @@
+int gas_consumption() asm "15000000 PUSHINT"; ;; 0.015 TON for mainnet
+
+int min_tons_for_storage() asm "10000000 PUSHINT"; ;; 0.01 TON
+
+int pre_transfer_fee() asm "10000000 PUSHINT"; ;; 0.01 TON

@@ -1,0 +1,30 @@
+cell pack_anti_bot_record_data(slice admin_address, slice owner_address, int last_transaction_time, int delay_time) inline {
+   return  begin_cell()
+            .store_slice(admin_address)
+            .store_slice(owner_address)
+            .store_uint(last_transaction_time, 64)
+            .store_uint(delay_time, 64)
+           .end_cell();
+}
+
+cell calculate_anti_bot_record_state_init(slice admin_address, slice owner_address, int delay_time, cell anti_bot_record_code) inline {
+  return begin_cell()
+          .store_uint(0, 2)
+          .store_dict(anti_bot_record_code)
+          .store_dict(pack_anti_bot_record_data(admin_address, owner_address, 0, delay_time))
+          .store_uint(0, 1)
+         .end_cell();
+}
+
+slice calculate_anti_bot_record_address(cell state_init) inline {
+  return begin_cell().store_uint(4, 3)
+                     .store_int(workchain(), 8)
+                     .store_uint(cell_hash(state_init), 256)
+                     .end_cell()
+                     .begin_parse();
+}
+
+slice calculate_user_anti_bot_record_address(slice admin_address, slice owner_address, int delay_time, cell anti_bot_record_code) inline {
+  return calculate_anti_bot_record_address(calculate_anti_bot_record_state_init(admin_address, owner_address, delay_time, anti_bot_record_code));
+}
+
