@@ -1,30 +1,38 @@
 
 (int, slice, slice, cell, cell) load_data() inline {
   slice ds = get_data().begin_parse();
-  return (ds~load_coins(), ds~load_msg_addr(), ds~load_msg_addr(), ds~load_ref(), ds~load_ref());
+  return (
+    ds~load_coins(), ;; balance
+    ds~load_msg_addr(), ;; owner_address
+    ds~load_msg_addr(), ;; jetton_master_address
+    ds~load_ref(), ;; jetton_wallet_code
+    ds~load_ref()); ;; anti_bot_data
 }
 
-() save_data (int balance, slice owner_address, slice jetton_master_address, cell anti_bot_data, cell jetton_wallet_code) impure inline {
+() save_data (int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code, cell anti_bot_data) impure inline {
   set_data(begin_cell()
             .store_coins(balance)
             .store_slice(owner_address)
             .store_slice(jetton_master_address)
-            .store_ref(anti_bot_data)
             .store_ref(jetton_wallet_code)
+            .store_ref(anti_bot_data)
             .end_cell()
           );
 }
 
-(int, int, slice) unpack_anti_bot_data(cell anti_bot_data) {
+(int, int, int) unpack_anti_bot_data(cell anti_bot_data) {
   slice cs = anti_bot_data.begin_parse();
-  return (cs~load_int(32), cs~load_uint(64), cs~load_msg_addr());
+  return (
+    cs~load_int(32), ;; is_white_list
+    cs~load_uint(64), ;; last_transaction_time
+    cs~load_uint(64)); ;; disable_time
 }
 
-cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti_bot_address) {
+cell pack_anti_bot_data(int is_white_list, int last_transaction_time, int disable_time) {
   return begin_cell()
     .store_int(is_white_list, 32)
     .store_uint(last_transaction_time, 64)
-    .store_slice(anti_bot_address)
+    .store_uint(disable_time, 64)
     .end_cell();
 }
 
@@ -40,43 +48,6 @@ cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti
                      = InternalMsgBody;
 -}
 
-() send_tokens (slice in_msg_body, slice sender_address, int msg_value, int fwd_fee) impure {
-  int query_id = in_msg_body~load_uint(64);
-  cell master_msg = in_msg_body~load_ref();
-  slice cs = master_msg.begin_parse();
-  int jetton_amount = cs~load_coins();
-  cs~load_msg_addr(); ;; skip to_wallet_address
-  cs~load_msg_addr(); ;; skip response_address
-  cs~load_dict(); ;; skip custom_payload
-  int forward_ton_amount = cs~load_coins();
-  int fwd_count = forward_ton_amount ? 2 : 1;
-  throw_unless(709, msg_value >
-                     forward_ton_amount +
-                     ;; 3 messages: wal1->wal2,  wal2->owner, wal2->response
-                     ;; but last one is optional (it is ok if it fails)
-                     fwd_count * fwd_fee +
-                     (2 * gas_consumption() + min_tons_for_storage()) + 
-                     pre_transfer_fee());
-
-  (int balance, slice owner_address, slice jetton_master_address, cell anti_bot_data, cell jetton_wallet_code) = load_data();
-  throw_unless(705, equal_slices(owner_address, sender_address));
-  (int is_white_list, int last_transaction_time, slice anti_bot_address) = unpack_anti_bot_data(anti_bot_data);
-
-  var msg = begin_cell()
-    .store_uint(0x18, 6)
-    .store_slice(anti_bot_address)
-    .store_coins(0)
-    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
-    .store_uint(op::pre_transfer_check(), 32)
-    .store_uint(query_id, 64)
-    .store_coins(jetton_amount)
-    .store_uint(last_transaction_time, 64)
-    .store_int(is_white_list, 32)
-    .store_ref(master_msg)
-    .end_cell();
-  send_raw_message(msg, 64); ;; revert on errors
-}
-
 () execute_send_tokens (slice in_msg_body, slice sender_address, int msg_value, int fwd_fee) impure {
   int query_id = in_msg_body~load_uint(64);
   cell master_msg = in_msg_body~load_ref();
@@ -85,15 +56,20 @@ cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti
   int jetton_amount = cs~load_coins();
   slice to_owner_address = cs~load_msg_addr();
   force_chain(to_owner_address);
-  (int balance, slice owner_address, slice jetton_master_address, cell anti_bot_data, cell jetton_wallet_code) = load_data();
-  (int is_white_list, int last_transaction_time, slice anti_bot_address) = unpack_anti_bot_data(anti_bot_data);
+  (int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code, cell anti_bot_data) = load_data();
+  (int is_white_list, int last_transaction_time, int disable_time) = unpack_anti_bot_data(anti_bot_data);
   last_transaction_time = now();
   balance -= jetton_amount;
 
-  throw_unless(ONLY_ANTI_BOT, equal_slices(anti_bot_address, sender_address));
+
+  if (is_white_list | (disable_time <= now())) {
+    throw_unless(705, equal_slices(owner_address, sender_address));
+  } else {
+    throw_unless(707, equal_slices(jetton_master_address, sender_address));
+  }
   throw_unless(706, balance >= 0);
 
-  cell state_init = calculate_jetton_wallet_state_init(to_owner_address, jetton_master_address, anti_bot_address, jetton_wallet_code);
+  cell state_init = calculate_jetton_wallet_state_init(to_owner_address, jetton_master_address, jetton_wallet_code, disable_time);
   slice to_wallet_address = calculate_jetton_wallet_address(state_init);
   slice response_address = cs~load_msg_addr();
   cell custom_payload = cs~load_dict();
@@ -129,8 +105,49 @@ cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti
                      ;; msg_fwd_fee(to_wallet, msg_body, state_init, 15)
 
   send_raw_message(msg.end_cell(), 64); ;; revert on errors
-  anti_bot_data = pack_anti_bot_data(is_white_list, last_transaction_time, anti_bot_address);
-  save_data(balance, owner_address, jetton_master_address, anti_bot_data, jetton_wallet_code);
+  anti_bot_data = pack_anti_bot_data(is_white_list, last_transaction_time, disable_time);
+  save_data(balance, owner_address, jetton_master_address, jetton_wallet_code, anti_bot_data);
+}
+
+() send_tokens (slice in_msg_body, slice sender_address, int msg_value, int fwd_fee) impure {
+  (int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code, cell anti_bot_data) = load_data();
+  throw_unless(705, equal_slices(owner_address, sender_address));
+  (int is_white_list, int last_transaction_time, int disable_time) = unpack_anti_bot_data(anti_bot_data);
+
+  if(is_white_list | (disable_time <= now())) {
+    execute_send_tokens(in_msg_body, sender_address, msg_value, fwd_fee);
+    return ();
+  }
+
+  int query_id = in_msg_body~load_uint(64);
+  cell master_msg = in_msg_body~load_ref();
+  slice cs = master_msg.begin_parse();
+  int jetton_amount = cs~load_coins();
+  cs~load_msg_addr(); ;; skip to_wallet_address
+  cs~load_msg_addr(); ;; skip response_address
+  cs~load_dict(); ;; skip custom_payload
+  int forward_ton_amount = cs~load_coins();
+  int fwd_count = forward_ton_amount ? 2 : 1;
+  throw_unless(709, msg_value >
+                     forward_ton_amount +
+                     ;; 3 messages: wal1->wal2,  wal2->owner, wal2->response
+                     ;; but last one is optional (it is ok if it fails)
+                     fwd_count * fwd_fee +
+                     (2 * gas_consumption() + min_tons_for_storage()) + 
+                     pre_transfer_fee());
+  var msg = begin_cell()
+    .store_uint(0x18, 6)
+    .store_slice(jetton_master_address)
+    .store_coins(0)
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+    .store_uint(op::pre_transfer_check(), 32)
+    .store_uint(query_id, 64)
+    .store_coins(jetton_amount)
+    .store_uint(last_transaction_time, 64)
+    .store_slice(owner_address)
+    .store_ref(master_msg)
+    .end_cell();
+  send_raw_message(msg, 64); ;; revert on errors
 }
 
 {-
@@ -144,8 +161,8 @@ cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti
 () receive_tokens (slice in_msg_body, slice sender_address, int my_ton_balance, int fwd_fee, int msg_value) impure {
   ;; NOTE we can not allow fails in action phase since in that case there will be
   ;; no bounce. Thus check and throw in computation phase.
-  (int balance, slice owner_address, slice jetton_master_address, cell anti_bot_data, cell jetton_wallet_code) = load_data();
-  (int is_white_list, int last_transaction_time, slice anti_bot_address) = unpack_anti_bot_data(anti_bot_data);
+  (int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code, cell anti_bot_data) = load_data();
+  (int is_white_list, int last_transaction_time, int disable_time) = unpack_anti_bot_data(anti_bot_data);
   int query_id = in_msg_body~load_uint(64);
   int jetton_amount = in_msg_body~load_coins();
   balance += jetton_amount;
@@ -154,7 +171,7 @@ cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti
   throw_unless(707,
       equal_slices(jetton_master_address, sender_address)
       |
-      equal_slices(calculate_user_jetton_wallet_address(from_address, jetton_master_address, anti_bot_address, jetton_wallet_code), sender_address)
+      equal_slices(calculate_user_jetton_wallet_address(from_address, jetton_master_address, jetton_wallet_code, disable_time), sender_address)
   );
   int forward_ton_amount = in_msg_body~load_coins();
 
@@ -194,13 +211,13 @@ cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti
     send_raw_message(msg.end_cell(), 2);
   }
 
-  save_data(balance, owner_address, jetton_master_address, anti_bot_data, jetton_wallet_code);
+  save_data(balance, owner_address, jetton_master_address, jetton_wallet_code, anti_bot_data);
 }
 
 () burn_tokens (slice in_msg_body, slice sender_address, int msg_value, int fwd_fee) impure {
   ;; NOTE we can not allow fails in action phase since in that case there will be
   ;; no bounce. Thus check and throw in computation phase.
-  (int balance, slice owner_address, slice jetton_master_address, cell anti_bot_data, cell jetton_wallet_code) = load_data();
+  (int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code, cell anti_bot_data) = load_data();
   int query_id = in_msg_body~load_uint(64);
   int jetton_amount = in_msg_body~load_coins();
   slice response_address = in_msg_body~load_msg_addr();
@@ -228,28 +245,28 @@ cell pack_anti_bot_data(int is_white_list, int last_transaction_time, slice anti
 
   send_raw_message(msg.end_cell(), 64);
 
-  save_data(balance, owner_address, jetton_master_address, anti_bot_data, jetton_wallet_code);
+  save_data(balance, owner_address, jetton_master_address, jetton_wallet_code, anti_bot_data);
 }
 
 () set_white_list(slice in_msg_body, slice sender_address) impure {
-  (int balance, slice owner_address, slice jetton_master_address, cell anti_bot_data, cell jetton_wallet_code) = load_data();
+  (int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code, cell anti_bot_data) = load_data();
   throw_unless(705, equal_slices(jetton_master_address, sender_address));
-  (int is_white_list, int last_transaction_time, slice anti_bot_address) = unpack_anti_bot_data(anti_bot_data);
+  (int is_white_list, int last_transaction_time, int disable_time) = unpack_anti_bot_data(anti_bot_data);
   int query_id = in_msg_body~load_uint(64);
   int is_white_list_new = in_msg_body~load_int(32);
-  anti_bot_data = pack_anti_bot_data(is_white_list_new, last_transaction_time, anti_bot_address);
-  save_data(balance, owner_address, jetton_master_address, anti_bot_data, jetton_wallet_code);
+  anti_bot_data = pack_anti_bot_data(is_white_list_new, last_transaction_time, disable_time);
+  save_data(balance, owner_address, jetton_master_address, jetton_wallet_code, anti_bot_data);
 }
 
 () on_bounce (slice in_msg_body) impure {
   in_msg_body~skip_bits(32); ;; 0xFFFFFFFF
-  (int balance, slice owner_address, slice jetton_master_address, cell anti_bot_data, cell jetton_wallet_code) = load_data();
+  (int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code, cell anti_bot_data) = load_data();
   int op = in_msg_body~load_uint(32);
   throw_unless(709, (op == op::internal_transfer()) | (op == op::burn_notification()));
   int query_id = in_msg_body~load_uint(64);
   int jetton_amount = in_msg_body~load_coins();
   balance += jetton_amount;
-  save_data(balance, owner_address, jetton_master_address, anti_bot_data, jetton_wallet_code);
+  save_data(balance, owner_address, jetton_master_address, jetton_wallet_code, anti_bot_data);
 }
 
 () recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {

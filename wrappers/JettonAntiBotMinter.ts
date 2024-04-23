@@ -13,6 +13,7 @@ import {
 } from '@ton/core';
 
 import { Op } from './Constants';
+import { buildJettonOnchainMetadata } from './utils';
 
 export type JettonAntiBotMinterContent = {
     type: 0 | 1;
@@ -21,14 +22,24 @@ export type JettonAntiBotMinterContent = {
 };
 
 export type AntiBotData = {
-    anti_bot_address: Address
-}
+    amount_limit_per_trade: bigint;
+    amount_limit_per_block: bigint;
+    timer_limit_per_trade: bigint;
+    disable_time: bigint;
+    last_block_time: bigint;
+    last_block_amount: bigint;
+};
 
-export type JettonAntiBotMinterConfig = { admin: Address; anti_bot_address: Address; content: Cell; wallet_code: Cell };
+export type JettonAntiBotMinterConfig = { admin: Address; content: Cell; wallet_code: Cell };
 
 export function antiBotDataToCell(data: AntiBotData): Cell {
     return beginCell()
-        .storeAddress(data.anti_bot_address)
+        .storeCoins(data.amount_limit_per_trade)
+        .storeCoins(data.amount_limit_per_block)
+        .storeUint(data.timer_limit_per_trade, 64)
+        .storeUint(data.disable_time, 64)
+        .storeUint(data.last_block_time, 64)
+        .storeCoins(data.last_block_amount)
         .endCell();
 }
 
@@ -36,7 +47,6 @@ export function jettonAntiBotMinterConfigToCell(config: JettonAntiBotMinterConfi
     return beginCell()
         .storeCoins(0)
         .storeAddress(config.admin)
-        .storeAddress(config.anti_bot_address)
         .storeRef(config.content)
         .storeRef(config.wallet_code)
         .endCell();
@@ -45,7 +55,15 @@ export function jettonAntiBotMinterConfigToCell(config: JettonAntiBotMinterConfi
 export function jettonAntiBotContentToCell(content: JettonAntiBotMinterContent) {
     return beginCell()
         .storeUint(content.type, 8)
-        .storeStringTail(content.uri) //Snake logic under the hood
+        .storeRef(
+            buildJettonOnchainMetadata({
+                name: 'Sample Jetton',
+                description: 'Anyaxis',
+                symbol: 'AA',
+                decimals: '9',
+                image: 'https://www.svgrepo.com/download/483336/coin-vector.svg',
+            }),
+        ) //Snake logic under the hood
         .storeRef(content.antiBotData)
         .endCell();
 }
@@ -130,7 +148,13 @@ export class JettonAntiBotMinter implements Contract {
         }
         await provider.internal(via, {
             sendMode: SendMode.PAY_GAS_SEPARATELY,
-            body: JettonAntiBotMinter.mintMessage(this.address, to, JettonAntiBot_amount, forward_ton_amount, total_ton_amount),
+            body: JettonAntiBotMinter.mintMessage(
+                this.address,
+                to,
+                JettonAntiBot_amount,
+                forward_ton_amount,
+                total_ton_amount,
+            ),
             value: total_ton_amount + toNano('0.015'),
         });
     }
@@ -207,7 +231,13 @@ export class JettonAntiBotMinter implements Contract {
         });
     }
 
-    async sendUpdateWhiteList(provider: ContractProvider, via: Sender, user: Address, forward_ton_amount: bigint, isWhiteList: number) {
+    async sendUpdateWhiteList(
+        provider: ContractProvider,
+        via: Sender,
+        user: Address,
+        forward_ton_amount: bigint,
+        isWhiteList: number,
+    ) {
         await provider.internal(via, {
             sendMode: SendMode.PAY_GAS_SEPARATELY,
             body: beginCell()
@@ -233,14 +263,12 @@ export class JettonAntiBotMinter implements Contract {
         let totalSupply = res.stack.readBigNumber();
         let mintable = res.stack.readBoolean();
         let adminAddress = res.stack.readAddress();
-        let antiBotAddress = res.stack.readAddress();
         let content = res.stack.readCell();
         let walletCode = res.stack.readCell();
         return {
             totalSupply,
             mintable,
             adminAddress,
-            antiBotAddress,
             content,
             walletCode,
         };
@@ -257,9 +285,5 @@ export class JettonAntiBotMinter implements Contract {
     async getContent(provider: ContractProvider) {
         let res = await this.getJettonAntiBotData(provider);
         return res.content;
-    }
-    async getAntiBotAddress(provider: ContractProvider) {
-        let res = await this.getJettonAntiBotData(provider);
-        return res.antiBotAddress;
     }
 }

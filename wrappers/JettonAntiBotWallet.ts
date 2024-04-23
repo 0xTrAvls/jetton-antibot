@@ -60,12 +60,13 @@ export class JettonAntiBotWallet implements Contract {
         res.stack.readBigNumber();
         res.stack.readAddress();
         res.stack.readAddress();
+        res.stack.readCell();
         let antiBotData = res.stack.readCell();
         let antiBotDataSlice = antiBotData.asSlice();
         let isWhiteList = antiBotDataSlice.loadInt(32);
         let lastTransactionTime = antiBotDataSlice.loadUint(64);
-        let antiBotAddress = antiBotDataSlice.loadAddress();
-        return { isWhiteList, lastTransactionTime, antiBotAddress };
+        let disableTime = antiBotDataSlice.loadUint(64);
+        return { isWhiteList, lastTransactionTime, disableTime };
     }
 
     static transferMessage(

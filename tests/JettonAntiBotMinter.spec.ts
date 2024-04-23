@@ -46,34 +46,23 @@ describe('JettonWallet', () => {
         deployer = await blockchain.treasury('deployer');
         notDeployer = await blockchain.treasury('notDeployer');
 
-
-        antiBot = blockchain.openContract(
-            AntiBot.createFromConfig(
-                {
-                    owner: deployer.address,
-                    amount_limit_per_trade: toNano('1'),
-                    amount_limit_per_block: toNano('100'),
-                    delay_time: 20n,
-                    time_limit_per_trade: 20,
-                    disable_time: 10000,
-                },
-                anti_bot_code,
-            ),
-        );
-        const deployAntiBotResult = await antiBot.sendDeploy(deployer.getSender(), toNano('0.05'));
-        expect(deployAntiBotResult.transactions).toHaveTransaction({
-            from: deployer.address,
-            to: antiBot.address,
-            success: true,
-            deploy: true,
+        defaultContent = jettonAntiBotContentToCell({
+            type: 1,
+            uri: 'https://ton.org',
+            antiBotData: antiBotDataToCell({
+                amount_limit_per_trade: toNano('1'),
+                amount_limit_per_block: toNano('1000'),
+                timer_limit_per_trade: 10n,
+                disable_time: 100000000n,
+                last_block_time: 0n,
+                last_block_amount: 0n,
+            })
         });
 
-        defaultContent = jettonAntiBotContentToCell({ type: 1, uri: 'https://testjetton.org/content.json' });
         jettonMinter = blockchain.openContract(
             JettonAntiBotMinter.createFromConfig(
                 {
                     admin: deployer.address,
-                    anti_bot_address: antiBot.address,
                     content: defaultContent,
                     wallet_code: jwallet_code,
                 },
@@ -93,10 +82,6 @@ describe('JettonWallet', () => {
             to: jettonMinter.address,
             deploy: true,
         });
-    });
-
-    it('should actived anti bot', async () => {
-        let result = await antiBot.getAntiBotData();
     });
 
     // implementation detail
@@ -207,7 +192,19 @@ describe('JettonWallet', () => {
     });
 
     it('minter admin can change content', async () => {
-        let newContent = jettonAntiBotContentToCell({ type: 1, uri: 'https://totally_new_jetton.org/content.json' });
+        let newContent = jettonAntiBotContentToCell({
+            type: 1,
+            uri: 'https://ton.org',
+            antiBotData: antiBotDataToCell({
+                amount_limit_per_trade: toNano('1'),
+                amount_limit_per_block: toNano('1000'),
+                timer_limit_per_trade: 10n,
+                disable_time: 100000000n,
+                last_block_time: 0n,
+                last_block_amount: 0n,
+            })
+        });
+
         expect((await jettonMinter.getContent()).equals(defaultContent)).toBe(true);
         let changeContent = await jettonMinter.sendChangeContent(deployer.getSender(), newContent);
         expect((await jettonMinter.getContent()).equals(newContent)).toBe(true);
@@ -280,7 +277,7 @@ describe('JettonWallet', () => {
         );
         expect(sendResult.transactions).toHaveTransaction({
             from: deployerJettonWallet.address,
-            to: antiBot.address,
+            to: jettonMinter.address,
             success: false,
             exitCode: Errors.TIME_DILATION_NOT_ENOUGH
         });
@@ -310,7 +307,7 @@ describe('JettonWallet', () => {
         );
         expect(sendResult.transactions).toHaveTransaction({
             from: deployerJettonWallet.address,
-            to: antiBot.address,
+            to: jettonMinter.address,
             success: false,
             exitCode: Errors.AMOUNT_LIMIT_PER_TRADE_OVERFLOW
         });

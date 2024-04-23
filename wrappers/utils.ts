@@ -1,5 +1,61 @@
 
-import { Address, toNano, Cell} from "@ton/core";
+import { Address, beginCell, Cell, Contract, contractAddress, ContractProvider, Sender, SendMode, toNano, internal as internal_relaxed, storeMessageRelaxed } from '@ton/core';
+import { Dictionary } from '@ton/core';
+import { Op } from './Constants';
+import { Sha256 } from '@aws-crypto/sha256-js';
+
+export const SNAKE_PREFIX = 0x00;
+export const ONCHAIN_CONTENT_PREFIX = 0x00;
+export const OFFCHAIN_CONTENT_PREFIX = 0x01;
+
+export const sha256 = (str: string) => {
+    const sha = new Sha256();
+    sha.update(str);
+    return Buffer.from(sha.digestSync());
+  };
+
+function bufferToChunks(buff: Buffer, chunkSize: number) {
+    const chunks: Buffer[] = [];
+    while (buff.byteLength > 0) {
+      chunks.push(buff.slice(0, chunkSize));
+      buff = buff.slice(chunkSize);
+    }
+    return chunks;
+  }
+  
+  export const toKey = (key: string) => {
+    return BigInt(`0x${sha256(key).toString('hex')}`);
+  };
+  
+  export function makeSnakeCell(data: Buffer) {
+    // Create a cell that package the data
+    const CELL_MAX_SIZE_BYTES = Math.floor((1023 - 8) / 8);
+    const chunks = bufferToChunks(data, CELL_MAX_SIZE_BYTES);
+  
+    const b = chunks.reduceRight((curCell, chunk, index) => {
+      if (index === 0) {
+        curCell.storeInt(SNAKE_PREFIX, 8);
+      }
+      curCell.storeBuffer(chunk);
+      if (index > 0) {
+        const cell = curCell.endCell();
+        return beginCell().storeRef(cell);
+      }
+      return curCell;
+    }, beginCell());
+    return b.endCell();
+  }
+
+  export function buildJettonOnchainMetadata(data: { [s: string]: string }): Cell {
+    const dict = Dictionary.empty(Dictionary.Keys.BigUint(256), Dictionary.Values.Cell());
+  
+    // Store the on-chain metadata in the dictionary
+    Object.entries(data).forEach(([key, value]) => {
+      dict.set(toKey(key), makeSnakeCell(Buffer.from(value, 'utf8')));
+    });
+  
+    return beginCell().storeInt(ONCHAIN_CONTENT_PREFIX, 8).storeDict(dict).endCell();
+  }
 
 export const randomAddress = (wc: number = 0) => {
     const buf = Buffer.alloc(32);

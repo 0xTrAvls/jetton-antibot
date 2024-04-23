@@ -7,6 +7,7 @@ export const compile: CompilerConfig = {
         'contracts/params.fc',
         'contracts/op-codes.fc',
         'contracts/jetton-utils.fc',
+        'contracts/errors.fc',
         'contracts/jetton-anti-bot-minter.fc',
     ],
 };
