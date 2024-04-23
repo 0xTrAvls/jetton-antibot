@@ -18,7 +18,6 @@ export type AntiBotConfig = {
     owner: Address;
     amount_limit_per_trade: bigint;
     amount_limit_per_block: bigint;
-    delay_time: bigint;
     time_limit_per_trade: number | bigint;
     disable_time: number | bigint;
 };
@@ -28,7 +27,6 @@ export function antiBotConfigToCell(config: AntiBotConfig): Cell {
         .storeAddress(config.owner)
         .storeCoins(config.amount_limit_per_trade)
         .storeCoins(config.amount_limit_per_block)
-        .storeUint(config.delay_time, 64)
         .storeUint(config.time_limit_per_trade, 64)
         .storeUint(config.disable_time, 64)
         .storeUint(0, 64)

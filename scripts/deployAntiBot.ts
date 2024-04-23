@@ -7,7 +7,6 @@ export async function run(provider: NetworkProvider) {
         owner: provider.sender().address!,
         amount_limit_per_trade: 20n,
         amount_limit_per_block: 10000n,
-        delay_time: 5n,
         time_limit_per_trade: 10n,
         disable_time: 100000n
     }, await compile('AntiBot')));

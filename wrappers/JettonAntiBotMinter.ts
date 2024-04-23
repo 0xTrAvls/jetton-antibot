@@ -17,6 +17,7 @@ import { Op } from './Constants';
 export type JettonAntiBotMinterContent = {
     type: 0 | 1;
     uri: string;
+    antiBotData: Cell;
 };
 
 export type AntiBotData = {
@@ -45,6 +46,7 @@ export function jettonAntiBotContentToCell(content: JettonAntiBotMinterContent) 
     return beginCell()
         .storeUint(content.type, 8)
         .storeStringTail(content.uri) //Snake logic under the hood
+        .storeRef(content.antiBotData)
         .endCell();
 }
 
